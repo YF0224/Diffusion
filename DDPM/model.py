@@ -41,6 +41,20 @@ class ResBlock(nn.Module):
         return h + self.skip(x)
 
 
+class SelfAttention(nn.Module):
+    def __init__(self, ch, heads=4):
+        super().__init__()
+        self.norm = nn.GroupNorm(8, ch)
+        self.attn = nn.MultiheadAttention(ch, heads, batch_first=True)
+
+    def forward(self, x):
+        b, c, h, w = x.shape
+        y = self.norm(x).view(b, c, h * w).permute(0, 2, 1)  # (B, HW, C)
+        y, _ = self.attn(y, y, y, need_weights=False)
+        y = y.permute(0, 2, 1).view(b, c, h, w)
+        return x + y
+
+
 class SimpleUNet(nn.Module):
     def __init__(self, in_ch=3, base_ch=64, time_dim=128):
         super().__init__()
@@ -59,6 +73,7 @@ class SimpleUNet(nn.Module):
 
         # Bottleneck
         self.mid1 = ResBlock(base_ch * 4, base_ch * 4, time_dim)
+        self.mid_attn = SelfAttention(base_ch * 4, heads=4)
         self.mid2 = ResBlock(base_ch * 4, base_ch * 4, time_dim)
 
         # Decoder
@@ -80,6 +95,7 @@ class SimpleUNet(nn.Module):
 
         # Bottleneck
         m  = self.mid1(e3, t_emb)
+        m  = self.mid_attn(m)
         m  = self.mid2(m,  t_emb)
 
         # Decoder

@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+import math
 
 
 # ==================================================
@@ -12,8 +13,15 @@ class VPSDE:
         self.T = T
         self.device = device
 
-        # β 线性调度（与 DDPM 一致）
-        self.beta = torch.linspace(beta_start, beta_end, T).to(device)
+        # β cosine 调度（相比线性更平滑，常见于 improved DDPM）
+        def cosine_schedule(T, s=0.008):
+            steps = torch.arange(T + 1, device=device).float() / T
+            f = torch.cos((steps + s) / (1 + s) * math.pi / 2) ** 2
+            alpha_bar = f / f[0]
+            beta = 1 - alpha_bar[1:] / alpha_bar[:-1]
+            return beta.clamp(0, 0.999)
+
+        self.beta = cosine_schedule(T).to(device)
         self.alpha = 1.0 - self.beta
         self.alpha_bar = torch.cumprod(self.alpha, dim=0)
 

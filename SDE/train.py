@@ -25,6 +25,7 @@ def train():
     SAVE_DIR = "outputs_sde"
     USE_EMA = True
     EMA_DECAY = 0.999
+    MIN_SNR_GAMMA = 5.0
     os.makedirs(SAVE_DIR, exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -50,6 +51,12 @@ def train():
 
     sde = VPSDE(T=T, device=device)
 
+    # Min-SNR-γ 权重（shape: [T]）
+    with torch.no_grad():
+        snr = sde.alpha_bar / (1.0 - sde.alpha_bar)
+        gamma = torch.tensor(MIN_SNR_GAMMA, device=device)
+        min_snr_weight = torch.minimum(snr, gamma) / snr
+
     for epoch in range(1, EPOCHS + 1):
         model.train()
         total_loss = 0.0
@@ -59,10 +66,17 @@ def train():
             t = torch.randint(0, T, (x0.size(0),), device=device)
 
             xt, noise = sde.sde_sample(x0, t)
-            score_target = sde.get_score_target(noise, t)
 
             pred_score = model(xt, t)
-            loss = F.mse_loss(pred_score, score_target)
+
+            # 训练更稳定：把 score 预测映射回噪声预测 ε_θ，再做噪声空间 MSE
+            # score = -ε / √(1-ᾱ)  =>  ε = -score * √(1-ᾱ)
+            sa = sde.sqrt_one_minus_alpha_bar[t].view(-1, 1, 1, 1)
+            pred_noise = -pred_score * sa
+
+            per_example = F.mse_loss(pred_noise, noise, reduction="none").mean(dim=[1, 2, 3])
+            w = min_snr_weight[t]
+            loss = (per_example * w).mean()
 
             optimizer.zero_grad()
             loss.backward()

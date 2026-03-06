@@ -25,6 +25,7 @@ def train():
     SAVE_DIR   = "outputs"
     USE_EMA    = True
     EMA_DECAY  = 0.999
+    MIN_SNR_GAMMA = 5.0
     os.makedirs(SAVE_DIR, exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -54,6 +55,12 @@ def train():
     # ---- 扩散调度器 ----
     diffusion = DDPMScheduler(T=T, device=device)
 
+    # Min-SNR-γ 权重（shape: [T]）
+    with torch.no_grad():
+        snr = diffusion.alpha_bar / (1.0 - diffusion.alpha_bar)
+        gamma = torch.tensor(MIN_SNR_GAMMA, device=device)
+        min_snr_weight = torch.minimum(snr, gamma) / snr
+
     # ---- 训练循环 ----
     for epoch in range(1, EPOCHS + 1):
         model.train()
@@ -68,7 +75,11 @@ def train():
 
             # 预测噪声
             pred_noise = model(xt, t)
-            loss = F.mse_loss(pred_noise, noise)
+
+            # Min-SNR-γ 加权 MSE
+            per_example = F.mse_loss(pred_noise, noise, reduction="none").mean(dim=[1, 2, 3])
+            w = min_snr_weight[t]
+            loss = (per_example * w).mean()
 
             optimizer.zero_grad()
             loss.backward()
