@@ -1,0 +1,47 @@
+# DDPM 训练与生成配置（scripts/train、utils/generation_ddpm 共用）
+
+method: ddpm
+
+# 数据
+data:
+  dataset_name: cifar100
+  img_size: 32
+  batch_size: 128
+  num_workers: 4
+
+# 扩散
+diffusion:
+  T: 1000
+  schedule_type: cosine
+  beta_start: 1.0e-4
+  beta_end: 0.02
+  device: cuda
+
+# 模型（与 models.SimpleUNet 一致）
+model:
+  in_ch: 3
+  base_ch: 128
+  time_dim: 256
+  num_res_blocks: 2
+  # channel_mults 不写则用 UNet 默认 (1,2,4,8,8,8)
+
+# 训练
+train:
+  epochs: 500
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  use_amp: true
+  warmup_epochs: 5
+  use_ema: true
+  ema_decay: 0.9999
+  min_snr_gamma: 5.0
+  grad_clip: 1.0
+  sample_every: 10   # 每 10 epoch 采样一次看效果
+  save_every: 10     # 每 10 epoch 保存一次权重
+  log_every: 20
+
+# 输出（output/ddpm/ 下）
+output:
+  save_dir: ddpm
+  subdir_checkpoints: checkpoints
+  subdir_samples: samples
