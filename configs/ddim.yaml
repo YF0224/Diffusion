@@ -1,0 +1,51 @@
+# DDIM 训练与生成配置（与 DDPM 共用前向，逆向为确定性）
+
+method: ddim
+
+# 数据
+data:
+  dataset_name: cifar100
+  img_size: 32
+  batch_size: 128
+  num_workers: 4
+
+# 扩散（与 DDPM 相同 schedule）
+diffusion:
+  T: 1000
+  schedule_type: cosine
+  beta_start: 1.0e-4
+  beta_end: 0.02
+  device: cuda
+
+# 采样步数（推理时可少步）
+inference:
+  num_steps: 50
+  eta: 0.0   # 0=纯 DDIM，1=带随机性
+
+# 模型（与 models.SimpleUNet 一致）
+model:
+  in_ch: 3
+  base_ch: 128
+  time_dim: 256
+  num_res_blocks: 2
+
+# 训练
+train:
+  epochs: 500
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  use_amp: true
+  warmup_epochs: 5
+  use_ema: true
+  ema_decay: 0.9999
+  min_snr_gamma: 5.0
+  grad_clip: 1.0
+  sample_every: 10
+  save_every: 10
+  log_every: 20
+
+# 输出（output/ddim/ 下）
+output:
+  save_dir: ddim
+  subdir_checkpoints: checkpoints
+  subdir_samples: samples

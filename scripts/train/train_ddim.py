@@ -1,6 +1,6 @@
 """
-SDE 训练入口：VP-SDE，前向与 DDPM 一致，逆向欧拉。
-在项目根目录执行：python -m scripts.train.train_sde [--config configs/sde.yaml]
+DDIM 训练入口：与 DDPM 共用前向与 loss，逆向为确定性。
+在项目根目录执行：python -m scripts.train.train_ddim [--config configs/ddim.yaml]
 """
 import argparse
 import os
@@ -23,7 +23,7 @@ except ImportError:
 from configs import load_config
 from utils import get_dataloader, get_save_dir, LossLogger
 from models import SimpleUNet
-from diffusion.sde import SDEProcess
+from diffusion.ddim import DDIMProcess
 
 
 def _save_image_grid(tensor, path, nrow=4):
@@ -53,7 +53,7 @@ def get_lr_scheduler(optimizer, warmup_steps, total_steps):
 
 
 def train(cfg_path: str = None):
-    cfg = load_config(cfg_path or "sde.yaml")
+    cfg = load_config(cfg_path or "ddim.yaml")
     data_cfg = cfg["data"]
     diff_cfg = cfg["diffusion"]
     model_cfg = cfg["model"]
@@ -75,7 +75,8 @@ def train(cfg_path: str = None):
     batch_size = data_cfg["batch_size"]
     epochs = train_cfg["epochs"]
     num_workers = data_cfg.get("num_workers", 4)
-    dt_coef = inference_cfg.get("dt_coef", 1.0)
+    num_steps = inference_cfg.get("num_steps", 50)
+    eta = inference_cfg.get("eta", 0.0)
 
     print("Loading data...", flush=True)
     loader = get_dataloader(
@@ -112,8 +113,8 @@ def train(cfg_path: str = None):
         for p in ema_model.parameters():
             p.requires_grad_(False)
 
-    print("Building diffusion process (VP-SDE)...", flush=True)
-    diffusion = SDEProcess(
+    print("Building diffusion process (DDIM)...", flush=True)
+    diffusion = DDIMProcess(
         schedule_type=diff_cfg.get("schedule_type", "cosine"),
         T=T,
         beta_start=diff_cfg.get("beta_start", 1e-4),
@@ -122,7 +123,7 @@ def train(cfg_path: str = None):
     )
 
     with torch.no_grad():
-        snr = diffusion._schedule.alpha_bar / (1.0 - diffusion._schedule.alpha_bar)
+        snr = diffusion.alpha_bar / (1.0 - diffusion.alpha_bar)
         min_snr_weight = torch.minimum(
             snr, torch.tensor(train_cfg.get("min_snr_gamma", 5.0), device=device)
         ) / snr
@@ -185,7 +186,7 @@ def train(cfg_path: str = None):
         avg_loss = total_loss / steps_per_epoch
         print(f"Epoch [{epoch:4d}/{epochs}]  AvgLoss: {avg_loss:.5f}", flush=True)
         logger.log(epoch, avg_loss)
-        logger.plot(title="SDE Training Loss", ylabel="Loss")
+        logger.plot(title="DDIM Training Loss", ylabel="Loss")
 
         if epoch % sample_every == 0:
             sampler = ema_model if ema_model is not None else model
@@ -193,7 +194,7 @@ def train(cfg_path: str = None):
             with torch.no_grad():
                 samples = diffusion.sample_loop(
                     sampler, shape=(16, 3, img_size, img_size),
-                    dt_coef=dt_coef,
+                    num_steps=num_steps, eta=eta,
                 )
             samples = (samples.clamp(-1, 1) + 1) / 2
             _save_image_grid(
@@ -219,7 +220,7 @@ def train(cfg_path: str = None):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train VP-SDE")
-    parser.add_argument("--config", type=str, default="sde.yaml", help="configs/ 下文件名或路径")
+    parser = argparse.ArgumentParser(description="Train DDIM")
+    parser.add_argument("--config", type=str, default="ddim.yaml", help="configs/ 下文件名或路径")
     args = parser.parse_args()
     train(args.config)
